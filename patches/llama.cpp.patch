@@ -1,0 +1,451 @@
+diff --git a/common/common.cpp b/common/common.cpp
+index 8e997aa..f58f762 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -1183,6 +1183,7 @@ struct common_init_result::impl {
+ static const std::map<common_decision_type, std::string> COMMON_DECISION_TYPE_NAMES = {
+     { COMMON_DECISION_TYPE_OPENJEV, "openjev" },
+     { COMMON_DECISION_TYPE_LEV,     "lev"     },
++    { COMMON_DECISION_TYPE_STRANDS, "strands" },
+     { COMMON_DECISION_TYPE_KEV,     "kev"     },
+     { COMMON_DECISION_TYPE_NIMBLE,  "nimble"  },
+     { COMMON_DECISION_TYPE_LAYA,    "laya"    },
+@@ -1264,7 +1265,7 @@ common_init_result::common_init_result(common_params & params, bool model_only)
+     // this decision model returns a score for each token via the embeddings output
+     // TODO: maybe improve this in the future
+     const auto decision_type = common_get_decision_type(model);
+-    if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV) {
++    if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV || decision_type == COMMON_DECISION_TYPE_STRANDS) {
+         params.embedding    = true;
+         params.pooling_type = LLAMA_POOLING_TYPE_NONE;
+ 
+diff --git a/common/common.h b/common/common.h
+index f4b72d9..ba9cb07 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -957,6 +957,7 @@ enum common_decision_type {
+     COMMON_DECISION_TYPE_NONE,    // not a decision model
+     COMMON_DECISION_TYPE_OPENJEV, // logits of one label token per option, read at the last prompt token
+     COMMON_DECISION_TYPE_LEV,     // same as openjev, noul is read from a rating scale
++    COMMON_DECISION_TYPE_STRANDS,
+     COMMON_DECISION_TYPE_KEV,     // dot product of the hidden states of the last token and of one end token per option
+     COMMON_DECISION_TYPE_NIMBLE,  // same as openjev, the prompt lists all the questions of the request
+     COMMON_DECISION_TYPE_LAYA,    // score of one marker token per option, read from the embeddings output
+diff --git a/conversion/__init__.py b/conversion/__init__.py
+index d710f71..ec86da0 100644
+--- a/conversion/__init__.py
++++ b/conversion/__init__.py
+@@ -150,6 +150,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "LLaDAMoEModelLM": "llada",
+     "LLaDAModelLM": "llada",
+     "LLaMAForCausalLM": "llama",
++    "StrandsDeciderModel": "strands",
+     "KevModel": "lev",
+     "LevModel": "lev",
+     "NimbleModel": "lev",
+diff --git a/conversion/lev.py b/conversion/lev.py
+index 72b1244..1096ccf 100644
+--- a/conversion/lev.py
++++ b/conversion/lev.py
+@@ -16,9 +16,13 @@ from .qwen import Qwen3_5TextModel
+ 
+ def _decision_lora_base(dir_model: Path) -> tuple[str, str | None]:
+     # the base model of a LoRA adapter: (repo id, revision)
+-    with open(dir_model / "adapter_config.json", encoding="utf-8") as f:
++    adapter_dir = dir_model / "lora" if (dir_model / "hobson_config.json").is_file() else dir_model
++    with open(adapter_dir / "adapter_config.json", encoding="utf-8") as f:
+         lora_config = json.load(f)
+     revision = lora_config.get("revision")
++    if revision is None and (dir_model / "provenance.json").is_file():
++        with open(dir_model / "provenance.json", encoding="utf-8") as f:
++            revision = json.load(f).get("base_model_revision")
+     if revision is None and (dir_model / "training_config.json").is_file():
+         with open(dir_model / "training_config.json", encoding="utf-8") as f:
+             revision = json.load(f).get("base_revision")
+@@ -52,7 +56,8 @@ class _DecisionLoraMixin:
+         self.dir_adapter = dir_model
+         self.dir_model_card = dir_model
+ 
+-        with open(dir_model / "adapter_config.json", encoding="utf-8") as f:
++        adapter_dir = dir_model / "lora" if (dir_model / "hobson_config.json").is_file() else dir_model
++        with open(adapter_dir / "adapter_config.json", encoding="utf-8") as f:
+             lora_config = json.load(f)
+         # only a plain LoRA can be merged as scale * B @ A
+         assert lora_config["peft_type"] == "LORA"
+@@ -64,7 +69,7 @@ class _DecisionLoraMixin:
+ 
+         # "layers.0.mlp.up_proj.weight" -> {"A": tensor, "B": tensor}
+         self.lora: dict[str, dict[str, Tensor]] = {}
+-        for name, tensor in load_file(dir_model / "adapter_model.safetensors").items():
++        for name, tensor in load_file(adapter_dir / "adapter_model.safetensors").items():
+             base_name, _, part = name[name.index("layers."):].partition(".lora_")
+             assert part in ("A.weight", "B.weight"), f"unexpected LoRA tensor: {name}"
+             self.lora.setdefault(base_name + ".weight", {})[part[0]] = tensor.float()
+diff --git a/src/models/qwen35.cpp b/src/models/qwen35.cpp
+index d50f067..9522136 100644
+--- a/src/models/qwen35.cpp
++++ b/src/models/qwen35.cpp
+@@ -5,6 +5,8 @@ void llama_model_qwen35::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
+     ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 4, true);
+ 
++    ml.get_key(LLM_KV_ATTENTION_LAYERNORM_EPS, hparams.f_norm_eps, false);
++
+     // Load linear attention (gated delta net) parameters
+     ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+     ml.get_key(LLM_KV_SSM_INNER_SIZE,     hparams.ssm_d_inner);
+@@ -43,6 +45,9 @@ void llama_model_qwen35::load_arch_tensors(llama_model_loader & ml) {
+     output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), { n_embd }, 0);
+     output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), { n_embd, n_vocab }, TENSOR_NOT_REQUIRED);
+ 
++    cls_norm   = create_tensor(tn(LLM_TENSOR_CLS_NORM, "weight"), { n_embd }, TENSOR_NOT_REQUIRED);
++    cls_norm_b = create_tensor(tn(LLM_TENSOR_CLS_NORM, "bias"),   { n_embd }, TENSOR_NOT_REQUIRED);
++
+     // optional projection of the embeddings output
+     cls_out   = create_tensor(tn(LLM_TENSOR_CLS_OUT, "weight"), { n_embd, hparams.n_embd_out() }, TENSOR_NOT_REQUIRED);
+     cls_out_b = create_tensor(tn(LLM_TENSOR_CLS_OUT, "bias"),   { hparams.n_embd_out() },         TENSOR_NOT_REQUIRED);
+@@ -220,13 +225,17 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
+     res->t_embd = cur;
+ 
+     if (model.cls_out) {
+-        ggml_tensor * embd = build_lora_mm(model.cls_out, cur);
++        ggml_tensor * head = model.cls_norm ? build_norm(cur, model.cls_norm, model.cls_norm_b, LLM_NORM, -1) : cur;
++        ggml_tensor * embd = build_lora_mm(model.cls_out, head);
+         if (model.cls_out_b) {
+             embd = ggml_add(ctx0, embd, model.cls_out_b);
+         }
+         cb(embd, "result_embd_proj", -1);
+         res->t_embd = embd;
+         ggml_build_forward_expand(gf, embd);
++        if (model.cls_norm && cparams.embeddings) {
++            return;
++        }
+     }
+ 
+     // LM head
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 96d910a..3a70f60 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -163,6 +163,9 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
+     llama_build_and_test(test-chat.cpp WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+     target_include_directories(test-chat PRIVATE ${PROJECT_SOURCE_DIR}/tools/server)
+     target_link_libraries(test-chat PRIVATE server-context)
++    llama_build(test-strands.cpp)
++    target_include_directories(test-strands PRIVATE ${PROJECT_SOURCE_DIR}/tools/server ${PROJECT_SOURCE_DIR}/tools/mtmd)
++    target_link_libraries(test-strands PRIVATE server-context)
+     llama_build_and_test(test-json-schema-to-grammar.cpp)
+ 
+     if (NOT GGML_BACKEND_DL)
+diff --git a/tools/server/server-decision.cpp b/tools/server/server-decision.cpp
+index 70ba154..0e49bd0 100644
+--- a/tools/server/server-decision.cpp
++++ b/tools/server/server-decision.cpp
+@@ -1,4 +1,5 @@
+ #include "server-decision.h"
++#include "unicode.h"
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -63,7 +64,11 @@ void server_decision_context::init(const llama_model * model) {
+         temperatures[key + prefix_temp.size()] = temp;
+     }
+ 
+-    if (model_type == COMMON_DECISION_TYPE_OPENJEV) {
++    if (model_type == COMMON_DECISION_TYPE_STRANDS) {
++        n_options_max = 255;
++        ordinal_smoothing = std::stof(decision_meta_str(model, prefix + "ordinal_smoothing"));
++        strands_window = std::stoul(decision_meta_str(model, decision_meta_str(model, "general.architecture") + ".context_length"));
++    } else if (model_type == COMMON_DECISION_TYPE_OPENJEV) {
+         // one letter per option, each must be a single token
+         const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+         for (const char c : letters) {
+@@ -157,7 +162,7 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
+ 
+         if (type_name == "choice") {
+             question.type = SERVER_DECISION_QUESTION_CHOICE;
+-            if (!criteria.is_object() || criteria.empty()) {
++            if (!criteria.is_object() || criteria.empty() || (type == COMMON_DECISION_TYPE_STRANDS && criteria.size() < 2)) {
+                 throw err("\"criteria\" must be a non-empty object");
+             }
+             for (const auto & [key, description] : criteria.items()) {
+@@ -177,7 +182,11 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
+                 throw err("\"criteria\" must be an object");
+             }
+             for (const char * key : {"false", "true"}) {
+-                question.options.push_back({key, criteria.is_object() && criteria.contains(key) ? criteria.at(key) : json()});
++                json description = criteria.is_object() && criteria.contains(key) ? criteria.at(key) : json();
++                if (type == COMMON_DECISION_TYPE_STRANDS && (!criteria.is_object() || !criteria.contains(key))) {
++                    description = std::string(key) == "true" ? "the statement holds for this state" : "the statement does not hold for this state";
++                }
++                question.options.push_back({key, description});
+             }
+             if (noul_true_first) {
+                 std::swap(question.options[0], question.options[1]);
+@@ -446,6 +455,84 @@ std::string server_decision_context::render(
+     return jinja::runtime::gather_string_parts(results)->as_string().str();
+ }
+ 
++static std::string strands_whitespace(const std::string & text, bool collapse) {
++    std::vector<uint32_t> cps;
++    for (size_t offset = 0; offset < text.size();) {
++        const auto parsed = common_parse_utf8_codepoint(text, offset);
++        if (parsed.status != utf8_parse_result::SUCCESS) {
++            throw std::invalid_argument("Strands input contains invalid UTF-8");
++        }
++        cps.push_back(parsed.codepoint);
++        offset += parsed.bytes_consumed;
++    }
++    auto space = [](uint32_t cp) {
++        return (cp >= 0x09 && cp <= 0x0d) || (cp >= 0x1c && cp <= 0x20) || cp == 0x85 || cp == 0xa0 ||
++               cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) || cp == 0x2028 || cp == 0x2029 ||
++               cp == 0x202f || cp == 0x205f || cp == 0x3000;
++    };
++    size_t first = 0, last = cps.size();
++    while (first < last && space(cps[first])) { ++first; }
++    while (last > first && space(cps[last - 1])) { --last; }
++    std::string out;
++    bool pending = false;
++    for (size_t i = first; i < last; ++i) {
++        if (collapse && space(cps[i])) { pending = true; continue; }
++        if (pending) { out += ' '; pending = false; }
++        out += common_unicode_cpt_to_utf8(cps[i]);
++    }
++    return out;
++}
++
++static std::string strands_content(const json & value) {
++    if (value.is_null()) { return ""; }
++    return value.is_string() ? strands_whitespace(value.get<std::string>(), false) : value.dump(2);
++}
++
++void server_decision_context::fill_task_strands(const json & state, const server_decision_question & question, server_task & task) const {
++    const std::string state_text = "<state>\n" + strands_content(state) + "\n</state>\n";
++    const char * header = question.type == SERVER_DECISION_QUESTION_CHOICE ? "Select exactly one option." :
++                         question.type == SERVER_DECISION_QUESTION_SCORE ? "Rate the state against the ordered levels below (lowest first)." :
++                         "Decide whether the statement is true of the state.";
++    std::string suffix = "<question type=\"" + std::string(decision_question_type_name(question.type)) + "\">\n" + header + "\n" + strands_content(question.instructions) + "\n<options>\n";
++    std::vector<std::pair<size_t, size_t>> spans;
++    for (size_t i = 0; i < question.options.size(); ++i) {
++        const auto & option = question.options[i];
++        const size_t start = suffix.size();
++        suffix += std::to_string(i + 1) + ". " + option.key;
++        const auto description = strands_whitespace(strands_content(option.description), true);
++        if (!description.empty()) { suffix += " \xE2\x80\x94 " + description; }
++        spans.emplace_back(start, suffix.size());
++        suffix += '\n';
++    }
++    suffix += "</options>\n</question>\n<answer>";
++    llama_tokens tokens = common_tokenize(vocab, state_text, true, true);
++    const auto question_tokens = common_tokenize(vocab, suffix, false, true);
++    if (tokens.size() + question_tokens.size() > strands_window) {
++        throw std::invalid_argument("Strands prompt exceeds the context window; shorten the state or question");
++    }
++    std::vector<std::pair<size_t, size_t>> offsets;
++    std::string decoded;
++    for (const auto token : question_tokens) {
++        const size_t start = decoded.size();
++        decoded += common_token_to_piece(vocab, token, true);
++        offsets.emplace_back(start, decoded.size());
++    }
++    if (decoded != suffix) { throw std::runtime_error("Strands tokenizer did not preserve the question text"); }
++    for (const auto & span : spans) {
++        int32_t marker = -1;
++        for (size_t i = 0; i < offsets.size(); ++i) {
++            if (offsets[i].first >= span.first && offsets[i].second <= span.second && offsets[i].second > offsets[i].first) {
++                marker = tokens.size() + i;
++            }
++        }
++        if (marker < 0) { throw std::invalid_argument("Strands option has no token"); }
++        task.decision.markers.push_back(marker);
++    }
++    tokens.insert(tokens.end(), question_tokens.begin(), question_tokens.end());
++    task.decision.pointer = tokens.size() - 1;
++    task.tokens = server_tokens(tokens, false);
++}
++
+ void server_decision_context::fill_task(
+         const json & state,
+         const std::vector<server_decision_question> & questions,
+@@ -455,6 +542,10 @@ void server_decision_context::fill_task(
+         mtmd_context * mctx,
+         const mtmd_helper_init_opt & init_opt,
+         server_task & task) const {
++    if (type == COMMON_DECISION_TYPE_STRANDS) {
++        fill_task_strands(state, question, task);
++        return;
++    }
+     const std::string prompt = render(state, questions, question, variant, files.size());
+ 
+     if (type == COMMON_DECISION_TYPE_OPENJEV || type == COMMON_DECISION_TYPE_LEV || type == COMMON_DECISION_TYPE_NIMBLE) {
+@@ -661,7 +752,18 @@ json server_decision_context::format_answer(const server_decision_question & que
+         answer["score"]         = expected;
+         answer["legend"]        = legend;
+         answer["probabilities"] = probabilities;
+-        answer["confidence"]    = decision_confidence_score(probs);
++        if (type == COMMON_DECISION_TYPE_STRANDS) {
++            double variance = 0.0;
++            for (size_t i = 0; i < n; ++i) {
++                variance += probs[i] * (i - expected) * (i - expected);
++            }
++            const double ceiling = (n - 1) / 2.0;
++            const double floor = std::sqrt(ordinal_smoothing);
++            const double sigma = std::sqrt(variance);
++            answer["confidence"] = ceiling <= floor ? (sigma <= floor ? 1.0 : 0.0) : std::clamp((ceiling - sigma) / (ceiling - floor), 0.0, 1.0);
++        } else {
++            answer["confidence"] = decision_confidence_score(probs);
++        }
+     }
+     return answer;
+ }
+diff --git a/tools/server/server-decision.h b/tools/server/server-decision.h
+index f443e47..ac4e422 100644
+--- a/tools/server/server-decision.h
++++ b/tools/server/server-decision.h
+@@ -101,6 +101,8 @@ private:
+     std::string text_marker;
+     size_t      max_head_tokens   = 0; // question + options
+     size_t      max_option_tokens = 48;
++    float       ordinal_smoothing = 0.0f;
++    size_t      strands_window = 4096;
+ 
+     std::string render(
+             const json & state,
+@@ -111,6 +113,7 @@ private:
+     json render_options(const server_decision_question & question, size_t variant) const;
+     size_t n_outputs(const server_decision_question & question) const;
+     void fill_task_laya(llama_tokens & tokens, const server_decision_question & question, server_task & task) const;
++    void fill_task_strands(const json & state, const server_decision_question & question, server_task & task) const;
+ 
+     float get_temperature(const server_decision_question & question) const;
+ };
+diff --git a/conversion/strands.py b/conversion/strands.py
+new file mode 100644
+index 0000000..0f431f6
+--- /dev/null
++++ b/conversion/strands.py
+@@ -0,0 +1,64 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import torch
++from safetensors.torch import load_file
++
++from .base import ModelBase, gguf
++from .lev import _DecisionLoraMixin, _load_decision_lora_hparams
++from .qwen import Qwen3_5TextModel
++
++
++@ModelBase.register_hparams_loader(lambda path: (path / "hobson_config.json").is_file())
++def _load_strands_hparams(path: Path):
++    return _load_decision_lora_hparams(path, "StrandsDeciderModel")
++
++
++@ModelBase.register("StrandsDeciderModel")
++@ModelBase.example("StrandsAgents/strands-decider-2B-hobson-v19")
++class StrandsDeciderModel(_DecisionLoraMixin, Qwen3_5TextModel):
++    model_arch = gguf.MODEL_ARCH.QWEN35
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self.decision_config = json.loads((self.dir_adapter / "hobson_config.json").read_text())
++        if self.decision_config["head_type"] != "pointer":
++            raise ValueError("only the Strands pointer head is supported")
++        self.head = load_file(self.dir_adapter / "head.safetensors")
++        if set(self.head) != {"norm.weight", "norm.bias", "q.weight", "q.bias", "k.weight", "k.bias"}:
++            raise ValueError("unexpected Strands head tensors")
++
++    def set_vocab(self):
++        super().set_vocab()
++        self.gguf_writer.add_chat_template([{"name": "systemone", "template": "{{ state }}"}])
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        config = self.decision_config
++        self.gguf_writer.add_decision_type("strands")
++        self.gguf_writer.add_embedding_length_out(2 * config["pointer_dim"])
++        self.gguf_writer.add_context_length(config["max_length"])
++        for kind in ("choice", "score", "noul"):
++            self.gguf_writer.add_decision_temperature(kind, config["temperature_by_kind"].get(kind, config["temperature"]))
++        self.gguf_writer.add_float32("qwen35.decision.ordinal_smoothing", config["ordinal_smoothing"])
++        self.gguf_writer.add_layer_norm_eps(1e-5)
++        self.gguf_writer.add_string("qwen35.decision.prompt_version", "hobson-v19")
++
++    def generate_extra_tensors(self):
++        yield from super().generate_extra_tensors()
++        for suffix in ("weight", "bias"):
++            yield f"cls.norm.{suffix}", self.head[f"norm.{suffix}"].float()
++            yield f"cls.output.{suffix}", torch.cat([self.head[f"q.{suffix}"], self.head[f"k.{suffix}"]], dim=0).float()
++
++    def modify_tensors(self, data_torch, name, bid):
++        if name.startswith("cls."):
++            yield name, data_torch
++        else:
++            yield from super().modify_tensors(data_torch, name, bid)
++
++    def tensor_force_quant(self, name, new_name, bid, n_dims):
++        if new_name.startswith("cls."):
++            return gguf.GGMLQuantizationType.F32
++        return super().tensor_force_quant(name, new_name, bid, n_dims)
+diff --git a/tests/test-strands.cpp b/tests/test-strands.cpp
+new file mode 100644
+index 0000000..5e40d2c
+--- /dev/null
++++ b/tests/test-strands.cpp
+@@ -0,0 +1,54 @@
++#include "llama.h"
++#include "server-decision.h"
++
++#include <fstream>
++#include <iostream>
++#include <sstream>
++#include <stdexcept>
++
++int main(int argc, char ** argv) {
++    if (argc != 3) {
++        std::cerr << "usage: test-strands model.gguf reference.json\n";
++        return 1;
++    }
++    auto params = llama_model_default_params();
++    params.vocab_only = true;
++    llama_model * model = llama_model_load_from_file(argv[1], params);
++    if (!model) { return 1; }
++    int result = 0;
++    try {
++        server_decision_context decision;
++        decision.init(model);
++        std::ifstream file(argv[2]);
++        std::ostringstream content;
++        content << file.rdbuf();
++        const auto fixtures = json::parse(content.str());
++        size_t checked = 0;
++        for (const auto & fixture : fixtures) {
++            const auto & request = fixture.at("request");
++            const auto questions = decision.parse_questions(request);
++            for (size_t i = 0; i < questions.size(); ++i) {
++                server_task task(SERVER_TASK_TYPE_DECISION);
++                decision.fill_task(request.at("state"), questions, questions[i], 0, {}, nullptr, mtmd_helper_init_opt_default(), task);
++                const auto expected = fixture.at("tokens").at(i).get<std::vector<int32_t>>();
++                if (expected.size() != task.tokens.size()) { throw std::runtime_error("token count mismatch"); }
++                for (size_t j = 0; j < expected.size(); ++j) {
++                    if (expected[j] != task.tokens[j]) { throw std::runtime_error("token ID mismatch at " + std::to_string(j)); }
++                }
++                if (task.decision.markers != fixture.at("option_positions").at(i).get<std::vector<int32_t>>()) {
++                    throw std::runtime_error("option positions differ");
++                }
++                if (task.decision.pointer != fixture.at("answer_positions").at(i).get<int32_t>()) {
++                    throw std::runtime_error("answer position differs");
++                }
++                ++checked;
++            }
++        }
++        std::cout << "Exact token IDs and pointer positions match for " << checked << " questions\n";
++    } catch (const std::exception & e) {
++        std::cerr << e.what() << '\n';
++        result = 1;
++    }
++    llama_model_free(model);
++    return result;
++}

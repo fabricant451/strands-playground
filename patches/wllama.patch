@@ -1,0 +1,58 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4248078..8bc8066 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,8 @@
+ cmake_minimum_required(VERSION 3.14)
+ project("wllama")
+ 
++option(WLLAMA_THREADS "Enable WASM pthreads" ON)
++
+ option(WLLAMA_TEST_BACKEND "Build wllama with test-backend-ops included" OFF)
+ 
+ set(MTMD_VIDEO OFF CACHE BOOL "" FORCE)
+@@ -71,6 +73,16 @@ else()
+     )
+ endif()
+ 
++if (NOT WLLAMA_THREADS)
++    list(REMOVE_ITEM WLLAMA_COMPILE_OPTIONS -pthread)
++    list(REMOVE_ITEM WLLAMA_LINK_OPTIONS
++        -pthread
++        -sUSE_PTHREADS=1
++        "-sPTHREAD_POOL_SIZE=Module[\"pthreadPoolSize\"]"
++    )
++    set(CMAKE_THREAD_LIBS_INIT "")
++endif()
++
+ add_compile_options(${WLLAMA_COMPILE_OPTIONS})
+ add_link_options(${WLLAMA_LINK_OPTIONS})
+ 
+diff --git a/cpp/wllama-context.h b/cpp/wllama-context.h
+index a112f59..786726c 100644
+--- a/cpp/wllama-context.h
++++ b/cpp/wllama-context.h
+@@ -1031,12 +1031,21 @@ void server_queue::cleanup_pending_task(int id_target)
+ 
+ void server_queue::defer(server_task &&task)
+ {
+-  assert(false && "should not be called in wllama");
++  queue_tasks_deferred.push_back(std::move(task));
++  time_last_task = ggml_time_ms();
+ }
+ 
+ void server_queue::pop_deferred_task(int id_slot)
+ {
+-  // no deferred task in wllama, so this is a no-op
++  if (queue_tasks_deferred.empty())
++    return;
++  auto it = std::find_if(queue_tasks_deferred.begin(), queue_tasks_deferred.end(),
++                         [id_slot](const server_task &task) { return task.id_slot == id_slot; });
++  if (it == queue_tasks_deferred.end())
++    it = queue_tasks_deferred.begin();
++  queue_tasks.emplace_front(std::move(*it));
++  queue_tasks_deferred.erase(it);
++  time_last_task = ggml_time_ms();
+ }
+ 
+ void server_queue::wait_until_no_sleep()

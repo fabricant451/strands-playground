@@ -1,0 +1,16 @@
+{
+  "model": {
+    "repo": "StrandsAgents/strands-decider-2B-hobson-v19",
+    "revision": "bb282d786bc251fd4e3068de3ada9ddbb38127cd"
+  },
+  "base": {
+    "repo": "Qwen/Qwen3.5-2B-Base",
+    "revision": "b1485b2fa6dfa1287294f269f5fb618e03d52d7c",
+    "note": "inferred: Hub main at training time; hosts did not pin it"
+  },
+  "sources": {
+    "llama.cpp": "bed0a856606ee4a24a164066f73d2379447033f5",
+    "wllama": "7ed17361caf221a84aa1e80ca85a3d6324f3af85",
+    "strands-decider": "ddd11994bc451ffc78fa30f43037c291fd4d44b6"
+  }
+}

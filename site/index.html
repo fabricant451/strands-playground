@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strands decision playground</title>
+<style>
+  :root { font: 16px system-ui; color-scheme: light dark; }
+  body { max-width: 900px; margin: 3rem auto; padding: 0 1rem; }
+  textarea { box-sizing: border-box; width: 100%; padding: .8rem; margin: .5rem 0 1rem; font: 14px monospace; }
+  button,select { padding: .6rem 1rem; margin: 0 .3rem .5rem 0; }
+  #status { min-height: 2rem; }
+  progress { width: 100%; }
+  article { border: 1px solid #8886; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
+  .option { display: grid; grid-template-columns: 9rem 1fr 4rem; gap: 1rem; align-items: center; margin: .5rem 0; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+<h1>Strands decision playground</h1>
+<p>Choose options, judge a statement, or score text. Inference runs locally in your browser using WebGPU.</p>
+<p>Hobson v19 · Q8_0 · approximately 2 GB download, cached for later visits.</p>
+<button id="load">Load model</button><button id="stop" disabled>Stop</button><button id="unload" disabled>Unload</button>
+<p id="status" role="status">Ready to load.</p><progress id="progress" value="0" max="1" hidden></progress>
+<label for="state">State</label>
+<textarea id="state" rows="4">Help! My payouts have been failing for 3 days!</textarea>
+<label for="questions">Questions</label>
+<textarea id="questions" rows="15">{
+  "department": {
+    "type": "choice",
+    "instructions": "Which team should handle this?",
+    "criteria": {"billing": null, "sales": null, "retail": null}
+  },
+  "urgent": {"type": "noul", "instructions": "Does this convey urgency?"},
+  "frustration": {
+    "type": "score",
+    "instructions": "How frustrated is the writer?",
+    "criteria": ["calm", "frustrated", "depressed"]
+  }
+}</textarea>
+<button id="run" disabled>Decide</button>
+<div id="answers"></div><details><summary>Raw response</summary><pre id="raw"></pre></details>
+<script type="module" src="./demo.js"></script>
+</html>
