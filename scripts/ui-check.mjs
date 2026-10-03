@@ -25,7 +25,7 @@ try {
  await page.click('#load'); await page.click('#run');
  await page.waitForSelector('.result-card');
  assert.equal(await page.locator('.result-card').count(),3);
- assert.equal(await page.evaluate(()=>window.testRequest.questions.frustration.criteria[1]),'frustrated');
+ assert.deepEqual(await page.evaluate(()=>window.testRequest.questions.frustration.criteria), ['Not at all frustrated','Slightly frustrated','Moderately frustrated','Quite frustrated','Very frustrated']);
  await page.screenshot({path:'reports/ui-desktop.png',fullPage:true});
  await page.locator('.question-name').nth(1).fill('department');
  assert.match(await page.locator('#result-note').textContent(),/Inputs changed/);

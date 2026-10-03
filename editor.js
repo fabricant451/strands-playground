@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const initial = [
   {name:'department', type:'choice', instructions:'Which team should handle this?', options:[['billing',''],['sales',''],['retail','']]},
   {name:'urgent', type:'noul', instructions:'Does this convey urgency?', options:[]},
-  {name:'frustration', type:'score', instructions:'How frustrated is the writer?', options:[['calm',''],['frustrated',''],['depressed','']]},
+  {name:'frustration', type:'score', instructions:'How frustrated is the writer?', options:[['Not at all frustrated',''],['Slightly frustrated',''],['Moderately frustrated',''],['Quite frustrated',''],['Very frustrated','']]},
 ];
 let serial = 0;
 function field(label, control) {
