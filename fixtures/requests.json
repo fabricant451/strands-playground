@@ -1,0 +1,6 @@
+[
+  {"state":"Help! My payouts have been failing for 3 days! ","questions":{"department":{"type":"choice","instructions":"Which team should handle this?","criteria":{"billing":null,"sales":null,"retail":null}},"urgent":{"type":"noul","instructions":"Does this convey urgency?"},"frustration":{"type":"score","instructions":"How frustrated is the writer?","criteria":["calm","frustrated","depressed"]}}},
+  {"state":"Le colis est arrivé cassé. Je voudrais un remboursement 😞.","questions":{"route":{"type":"choice","instructions":"Choose a team.","criteria":{"returns":"Damaged items and refunds","sales":"New purchases","billing":"Invoices"}},"refund":{"type":"noul","instructions":"The customer requests a refund."}}},
+  {"state":"Everything works well. Thank you!","questions":{"happy":{"type":"score","instructions":"How positive is the message?","criteria":["negative","neutral","positive"]},"urgent":{"type":"noul","instructions":"Is urgent action required?","criteria":{"false":"No urgent action is needed","true":"Immediate attention required"}}}},
+  {"state":"","questions":{"color":{"type":"choice","instructions":"Which option is a color?","criteria":{"10":"dog","2":"blue","1":"table"}}}}
+]

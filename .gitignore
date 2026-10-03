@@ -1,0 +1,25 @@
+# Independent upstream checkouts and their builds
+/llama.cpp/
+/wllama/
+/strands-decider/
+/emsdk/
+/emdawnwebgpu_pkg/
+# Model weights, local environments, caches and measurements
+/models/
+/.venv/
+/node_modules/
+/reports/
+/build/
+/dist/
+__pycache__/
+*.py[cod]
+*.gguf
+*.safetensors
+*.log
+.DS_Store
+.env
+.env.*
+# Previous standalone deployment checkout (preserved locally)
+/deployment/strands-playground/
+# Emscripten compiler probes
+/a.out.*

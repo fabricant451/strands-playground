@@ -1,0 +1,14 @@
+{
+  "name": "strands-playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python3 scripts/package-pages.py",
+    "test:ui": "node scripts/ui-check.mjs",
+    "test:browser": "node scripts/browser-check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}
