@@ -1,41 +1,31 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strands decision playground</title>
-<style>
-  :root { font: 16px system-ui; color-scheme: light dark; }
-  body { max-width: 900px; margin: 3rem auto; padding: 0 1rem; }
-  textarea { box-sizing: border-box; width: 100%; padding: .8rem; margin: .5rem 0 1rem; font: 14px monospace; }
-  button,select { padding: .6rem 1rem; margin: 0 .3rem .5rem 0; }
-  #status { min-height: 2rem; }
-  progress { width: 100%; }
-  article { border: 1px solid #8886; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
-  .option { display: grid; grid-template-columns: 9rem 1fr 4rem; gap: 1rem; align-items: center; margin: .5rem 0; }
-  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-</style>
-<h1>Strands decision playground</h1>
-<p>Choose options, judge a statement, or score text. Inference runs locally in your browser using WebGPU.</p>
-<p>Hobson v19 · Q8_0 · approximately 2 GB download, cached for later visits.</p>
-<button id="load">Load model</button><button id="stop" disabled>Stop</button><button id="unload" disabled>Unload</button>
-<p id="status" role="status">Ready to load.</p><progress id="progress" value="0" max="1" hidden></progress>
-<label for="state">State</label>
-<textarea id="state" rows="4">Help! My payouts have been failing for 3 days!</textarea>
-<label for="questions">Questions</label>
-<textarea id="questions" rows="15">{
-  "department": {
-    "type": "choice",
-    "instructions": "Which team should handle this?",
-    "criteria": {"billing": null, "sales": null, "retail": null}
-  },
-  "urgent": {"type": "noul", "instructions": "Does this convey urgency?"},
-  "frustration": {
-    "type": "score",
-    "instructions": "How frustrated is the writer?",
-    "criteria": ["calm", "frustrated", "depressed"]
-  }
-}</textarea>
-<button id="run" disabled>Decide</button>
-<div id="answers"></div><details><summary>Raw response</summary><pre id="raw"></pre></details>
+<title>Strands / Decision playground</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header class="masthead"><a class="wordmark" href="./">strands<span> / playground</span></a><a href="https://github.com/fabricant451/strands-playground">Source ↗</a></header>
+<main>
+<section class="intro"><p class="eyebrow">A small lab for decisions</p><h1>Give it context.<br>Ask for a decision.</h1><p class="lede">Choose between options, test a statement, or place something on a scale. Everything runs in your browser.</p></section>
+<section class="model-strip" aria-label="Model controls"><div class="model-label"><span id="model-dot" class="dot"></span><div><strong>Strands Decider</strong><small>Hobson v19 · WebGPU · 1.9 GB, cached after download</small></div></div><div class="model-actions"><button id="load" class="primary">Load model</button><button id="stop" hidden>Stop</button><button id="unload" hidden>Unload</button></div><p id="status" role="status">Load once, then try as many questions as you like.</p><progress id="progress" value="0" max="1" hidden></progress></section>
+<div class="workspace">
+<section class="compose" aria-label="Request editor">
+<div class="section-heading"><h2><span class="step">01</span> Context</h2><button id="example" class="text-button">Reset example</button></div>
+<label for="state" class="hint">What should the model consider?</label><textarea id="state" rows="5" placeholder="Paste a message, a situation, or a piece of text...">Help! My payouts have been failing for 3 days!</textarea>
+<div class="section-heading questions-heading"><h2><span class="step">02</span> Questions <span id="question-count" class="count"></span></h2></div>
+<div id="questions"></div>
+<button id="add-question" class="add-question">+ Add question</button>
+<div class="run-row"><button id="run" class="primary run-button" disabled>Run decisions <span aria-hidden="true">↗</span></button><span id="run-hint" class="hint">Load the model to begin.</span></div>
+<p id="request-error" class="error" role="alert" hidden></p>
+<details class="technical"><summary>Request JSON</summary><pre id="request-json"></pre></details>
+</section>
+<section class="results" aria-labelledby="results-title"><div class="section-heading"><h2 id="results-title"><span class="step">03</span> Results</h2><span id="result-meta" class="hint"></span></div><p id="result-note" class="hint" role="status"></p><div id="empty-results"><span class="empty-symbol" aria-hidden="true">↳</span><h3>A little more clarity.</h3><p>Your decisions will appear here, with the model’s probability for each option.</p></div><div id="answers" aria-live="polite"></div><details id="raw-details" class="technical" hidden><summary>Response JSON</summary><pre id="raw"></pre></details></section>
+</div>
+</main>
+<footer><span>Strands Decider · An experimental decision model</span><a href="https://huggingface.co/fabricant451/strands-decider-2B-hobson-v19-GGUF">Model & details ↗</a></footer>
 <script type="module" src="./demo.js"></script>
+</body>
 </html>
